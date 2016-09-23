@@ -1,3 +1,5 @@
+import string
+
 # The number of characters in an access token.
 ACCESS_TOKEN_LENGTH = 77
 
@@ -6,6 +8,9 @@ METADATA_BUCKET = 'appscale-cloud-storage-bucket-metadata'
 
 # A reserved Riak KV bucket used for storing authentication tokens.
 TOKEN_BUCKET = 'appscale-cloud-storage-auth-tokens'
+
+# A reserved Riak KV bucket used for storing upload session state.
+UPLOAD_SESSION_BUCKET = 'appscale-cloud-storage-upload-ids'
 
 # The location of a Riak KV installation.
 RIAK_KV_HOST = 'localhost'
@@ -31,3 +36,16 @@ TOKEN_EXPIRATION = 3600
 # service credentials and existing AWS-style credentials to use with that
 # account.
 USERS = {}
+
+# The chunk size to use when fetching object data from S3.
+READ_SIZE = 1 << 20
+
+# The length of upload ID string.
+RESUMABLE_ID_LENGTH = 14
+
+# The characters used when generating upload ID strings.
+RESUMABLE_ID_CHARS = string.ascii_uppercase + string.digits + '_'
+
+# The chunk size to use when uploading data to S3. S3 requires a minimum of
+# 5MB for non-terminal chunks, but GCS allows 256KB chunks.
+UPLOAD_CHUNK_SIZE = 5 << 20

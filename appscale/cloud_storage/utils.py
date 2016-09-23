@@ -1,8 +1,10 @@
 import datetime
 import dateutil.parser
+import itertools
 import json
 import re
 
+from boto.s3.multipart import MultiPartUpload
 from flask import Response
 from riak.riak_object import RiakObject
 from .constants import HTTP_ERROR
@@ -110,3 +112,74 @@ def get_user(token):
     active_tokens[token] = {'user': token.data['user'],
                             'expiration': expiration}
     return active_tokens[token]['user']
+
+
+def set_upload_state(upload_id, state):
+    """ Stores state for a given upload ID. """
+    bucket = riak_connection.bucket(upload_session_bucket)
+    bucket.new(upload_id, data=state).store()
+
+
+def update_upload_state(upload_id, state):
+    """ Updates state for a given upload ID. """
+    bucket = riak_connection.bucket(upload_session_bucket)
+    obj = bucket.get(upload_id)
+    obj.data.update(state)
+    obj.store()
+
+
+def get_upload_state(upload_id):
+    """ Fetches state for a given upload ID. """
+    bucket = riak_connection.bucket(upload_session_bucket)
+    state = bucket.get(upload_id)
+    if not state.exists:
+        raise UploadNotFound('Invalid upload_id.')
+    return state.data
+
+
+def get_completed_ranges(upload_request):
+    """ Fetches list of tuples specifying completed ranges for an upload.
+
+    Args:
+        upload_request: A MultiPartUpload object.
+    Returns:
+        A list of tuples specifying completed byte ranges.
+    """
+    def drift(index_part):
+        index, part = index_part
+        return index - part.part_number
+
+    completed_ranges = []
+    for _, group in itertools.groupby(enumerate(upload_request), drift):
+        group = list(group)
+        first_part = group[0][1]
+        part_size = first_part.size
+        start_of_range = (first_part.part_number - 1) * part_size
+
+        last_part = group[-1][1]
+        start_of_last_part = (last_part.part_number - 1) * part_size
+        end_of_last_part = start_of_last_part + last_part.size - 1
+
+        completed_ranges.append((start_of_range, end_of_last_part))
+    return completed_ranges
+
+
+def completed_bytes(completed_ranges):
+    """ Fetches the total number of bytes stored for an upload. """
+    return sum([end - start + 1 for start, end in completed_ranges])
+
+
+def get_request_from_state(upload_id, upload_state, bucket):
+    """ Fetches or creates a MultiPartUpload object for an upload ID. """
+    if upload_state['status'] == UploadStates.NEW:
+        upload_request = bucket.initiate_multipart_upload(
+            upload_state['object'])
+        new_state = {'status': UploadStates.IN_PROGRESS,
+                     'object': upload_state['object'],
+                     'id': upload_request.id}
+        update_upload_state(upload_id, new_state)
+    else:
+        upload_request = MultiPartUpload(bucket=bucket)
+        upload_request.id = upload_state['id']
+        upload_request.key_name = upload_state['object']
+    return upload_request

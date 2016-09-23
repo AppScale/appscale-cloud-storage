@@ -4,6 +4,7 @@ from boto.s3.connection import OrdinaryCallingFormat
 from boto.s3.connection import S3Connection
 from appscale.cloud_storage import buckets
 from appscale.cloud_storage import oauth
+from appscale.cloud_storage import objects
 from appscale.cloud_storage import utils
 from flask import Flask
 from riak import RiakClient
@@ -28,6 +29,7 @@ utils.admin_connection = S3Connection(
 utils.riak_connection = RiakClient(nodes=app.config['RIAK_KV_NODES'])
 utils.metadata_bucket = app.config['METADATA_BUCKET']
 utils.token_bucket = app.config['TOKEN_BUCKET']
+utils.upload_session_bucket = app.config['UPLOAD_SESSION_BUCKET']
 
 
 # Buckets
@@ -39,6 +41,18 @@ app.add_url_rule('/storage/v1/b/<bucket_name>',
                  view_func=buckets.get_bucket, methods=['GET'])
 app.add_url_rule('/storage/v1/b/<bucket_name>',
                  view_func=buckets.delete_bucket, methods=['DELETE'])
+
+# Objects
+app.add_url_rule('/storage/v1/b/<bucket_name>/o',
+                 view_func=objects.list_objects, methods=['GET'])
+app.add_url_rule('/storage/v1/b/<bucket_name>/o/<object_name>',
+                 view_func=objects.get_object, methods=['GET'])
+app.add_url_rule('/storage/v1/b/<bucket_name>/o/<object_name>',
+                 view_func=objects.delete_object, methods=['DELETE'])
+app.add_url_rule('/upload/storage/v1/b/<bucket_name>/o',
+                 view_func=objects.insert_object, methods=['POST'])
+app.add_url_rule('/upload/storage/v1/b/<bucket_name>/o',
+                 view_func=objects.resumable_insert, methods=['PUT'])
 
 # Access Tokens
 app.add_url_rule('/o/oauth2/token',
