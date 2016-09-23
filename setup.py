@@ -13,8 +13,10 @@ setup(
     keywords='appscale cloud storage gcs',
     packages=['appscale', 'appscale.cloud_storage'],
     install_requires=[
+        'boto',
         'flask',
         'oauth2client',
+        'python-dateutil',
         'riak'
     ]
 )
