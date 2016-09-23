@@ -11,5 +11,10 @@ setup(
         'Programming Language :: Python :: 3'
     ],
     keywords='appscale cloud storage gcs',
-    packages=['appscale', 'appscale.cloud_storage']
+    packages=['appscale', 'appscale.cloud_storage'],
+    install_requires=[
+        'flask',
+        'oauth2client',
+        'riak'
+    ]
 )
