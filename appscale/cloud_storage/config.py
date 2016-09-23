@@ -27,6 +27,9 @@ S3_HOST = 'localhost'
 S3_PORT = 8080
 S3_USE_SSL = False
 
+# The host and port that AppScale Cloud Storage should serve on.
+SERVER_NAME = 'localhost:5000'
+
 # The number of seconds a token should be good for.
 TOKEN_EXPIRATION = 3600
 
