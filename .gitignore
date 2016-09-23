@@ -1,2 +1,3 @@
 .idea/
 *.pyc
+appscale_cloud_storage.egg-info/
