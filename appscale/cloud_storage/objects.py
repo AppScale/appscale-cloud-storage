@@ -1,6 +1,7 @@
 import base64
 import datetime
 import dateutil.parser
+import gzip
 import json
 import math
 import random
@@ -146,8 +147,18 @@ def insert_object(bucket_name, upload_type, conn):
         if object_name is None:
             return error('Object name is required.', HTTP_BAD_REQUEST)
 
+        # Decompress content if necessary.
+        if 'Content-Encoding' in request.headers:
+            if request.headers['Content-Encoding'] == 'gzip':
+                content = gzip.decompress(request.data)
+            else:
+                return error('Unrecognized Content-Encoding.',
+                             HTTP_NOT_IMPLEMENTED)
+        else:
+            content = request.data
+
         key = Key(bucket, object_name)
-        key.set_contents_from_string(request.data)
+        key.set_contents_from_string(content)
         obj = object_info(
             key, last_modified=datetime.datetime.now(datetime.timezone.utc))
         return Response(json.dumps(obj), mimetype='application/json')
@@ -183,6 +194,10 @@ def resumable_insert(bucket_name, upload_id, conn):
         upload_state = get_upload_state(upload_id)
     except UploadNotFound as state_error:
         return error(str(state_error), HTTP_BAD_REQUEST)
+
+    if 'Content-Encoding' in request.headers:
+        return error('Content-Encoding not permitted on resumable uploads.',
+                     HTTP_BAD_REQUEST)
 
     object_name = upload_state['object']
     request_length = int(request.headers['Content-Length'])
