@@ -28,8 +28,7 @@ from .utils import error
 from .utils import get_completed_ranges
 from .utils import get_request_from_state
 from .utils import get_upload_state
-from .utils import set_upload_state
-from .utils import update_upload_state
+from .utils import upsert_upload_state
 from .utils import UploadNotFound
 from .utils import UploadStates
 
@@ -174,7 +173,7 @@ def insert_object(bucket_name, upload_type, conn):
             new_upload_id, object_name))
 
         state = {'object': object_name, 'status': UploadStates.NEW}
-        set_upload_state(new_upload_id, state)
+        upsert_upload_state(new_upload_id, state)
 
         upload_url = url_for('insert_object', bucket_name=bucket_name)
         redirect = request.url_root[:-1] + upload_url + \
@@ -257,7 +256,7 @@ def resumable_insert(bucket_name, upload_id, conn):
         upload_request.complete_upload()
         # TODO: Clean up old state info after a week.
         new_state = {'status': UploadStates.COMPLETE, 'object': object_name}
-        update_upload_state(upload_id, new_state)
+        upsert_upload_state(upload_id, new_state)
         obj = object_info(bucket.get_key(object_name))
         return Response(json.dumps(obj), mimetype='application/json')
 

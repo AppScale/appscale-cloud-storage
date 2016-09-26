@@ -116,18 +116,15 @@ def get_user(token):
     return active_tokens[token]['user']
 
 
-def set_upload_state(upload_id, state):
-    """ Stores state for a given upload ID. """
-    bucket = riak_connection.bucket(upload_session_bucket)
-    bucket.new(upload_id, data=state).store()
-
-
-def update_upload_state(upload_id, state):
-    """ Updates state for a given upload ID. """
+def upsert_upload_state(upload_id, state):
+    """ Stores or updates state for a given upload ID. """
     bucket = riak_connection.bucket(config['UPLOAD_SESSION_BUCKET'])
     obj = bucket.get(upload_id)
-    obj.data.update(state)
-    obj.store()
+    if obj.exists:
+        obj.data.update(state)
+        obj.store()
+        return
+    bucket.new(upload_id, data=state).store()
 
 
 def get_upload_state(upload_id):
