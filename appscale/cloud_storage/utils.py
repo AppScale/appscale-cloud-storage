@@ -59,14 +59,16 @@ def index_bucket(bucket_name, project):
     """ Associates a bucket with a project. """
     bucket = riak_connection.bucket(config['METADATA_BUCKET'])
     obj = RiakObject(riak_connection, bucket, bucket_name)
-    obj.add_index('project', project)
+    obj.content_type = 'application/json'
+    obj.data = '{}'
+    obj.add_index('project_bin', project)
     obj.store()
 
 
 def query_buckets(project):
     """ Fetches a set of bucket names in a given project. """
     bucket = riak_connection.bucket(config['METADATA_BUCKET'])
-    return set(bucket.get_index(project).results)
+    return set(bucket.get_index('project_bin', project).results)
 
 
 def set_token(token, user_id, expiration):
