@@ -135,6 +135,7 @@ def get_object(bucket_name, object_name, conn):
 @authenticate
 @assert_required('uploadType')
 def insert_object(bucket_name, upload_type, conn):
+    """ Stores an object or starts a resumable upload. """
     bucket = conn.get_bucket(bucket_name)
 
     object_name = None
@@ -190,6 +191,7 @@ def insert_object(bucket_name, upload_type, conn):
 @authenticate
 @assert_required('upload_id')
 def resumable_insert(bucket_name, upload_id, conn):
+    """ Stores all or part of an object. """
     try:
         upload_state = get_upload_state(upload_id)
     except UploadNotFound as state_error:
