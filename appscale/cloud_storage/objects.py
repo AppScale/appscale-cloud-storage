@@ -1,4 +1,5 @@
 import base64
+import binascii
 import datetime
 import dateutil.parser
 import gzip
@@ -23,11 +24,15 @@ from .constants import HTTP_RESUME_INCOMPLETE
 from .decorators import assert_required
 from .decorators import assert_unsupported
 from .decorators import authenticate
+from .utils import calculate_md5
 from .utils import completed_bytes
+from .utils import delete_object_metadata
 from .utils import error
 from .utils import get_completed_ranges
+from .utils import get_object_metadata
 from .utils import get_request_from_state
 from .utils import get_upload_state
+from .utils import set_object_metadata
 from .utils import upsert_upload_state
 from .utils import UploadNotFound
 from .utils import UploadStates
@@ -54,11 +59,18 @@ def object_info(key, last_modified=None):
         'mediaLink': request.url_root[:-1] + object_url + '?alt=media'
     }
 
-    # Multipart uploads do not have MD5 metadata.
-    if '-' not in key.etag:
+    # Multipart uploads do not have MD5 metadata by default.
+    if key.md5 is not None:
+        md5 = binascii.unhexlify(key.md5)
+        obj['md5Hash'] = base64.b64encode(md5).decode()
+    elif '-' not in key.etag:
         md5 = bytearray.fromhex(key.etag[1:-1])
         obj['md5Hash'] = base64.b64encode(md5).decode()
+    else:
+        metadata = get_object_metadata(key)
+        obj.update(metadata)
 
+    current_app.logger.debug('obj: {}'.format(obj))
     return obj
 
 
@@ -99,6 +111,7 @@ def delete_object(bucket_name, object_name, conn):
     if key is None:
         return error('Not Found', HTTP_NOT_FOUND)
 
+    delete_object_metadata(key)
     key.delete()
     return '', HTTP_NO_CONTENT
 
@@ -253,12 +266,20 @@ def resumable_insert(bucket_name, upload_id, conn):
 
     completed_ranges = get_completed_ranges(upload_request)
     if completed_bytes(completed_ranges) == total_length:
+        # Ideally, the MD5 would be calculated before the request is finalized,
+        # but there doesn't seem to be a way to fetch part data beforehand.
         upload_request.complete_upload()
-        # TODO: Clean up old state info after a week.
+        key = bucket.get_key(object_name)
+        md5 = calculate_md5(key)
+
+        # TODO: Clean up old upload state info after a week.
         new_state = {'status': UploadStates.COMPLETE, 'object': object_name}
         upsert_upload_state(upload_id, new_state)
-        obj = object_info(bucket.get_key(object_name))
-        return Response(json.dumps(obj), mimetype='application/json')
+
+        key.md5 = binascii.hexlify(md5)
+        set_object_metadata(key, {'md5Hash': base64.b64encode(md5).decode()})
+        return Response(json.dumps(object_info(key)),
+                        mimetype='application/json')
 
     response = Response('', status=HTTP_RESUME_INCOMPLETE)
     range_strings = ['{}-{}'.format(start, end)

@@ -1,5 +1,6 @@
 import datetime
 import dateutil.parser
+import hashlib
 import itertools
 import json
 import re
@@ -176,9 +177,49 @@ def get_request_from_state(upload_id, upload_state, bucket):
         new_state = {'status': UploadStates.IN_PROGRESS,
                      'object': upload_state['object'],
                      'id': upload_request.id}
-        update_upload_state(upload_id, new_state)
+        upsert_upload_state(upload_id, new_state)
     else:
         upload_request = MultiPartUpload(bucket=bucket)
         upload_request.id = upload_state['id']
         upload_request.key_name = upload_state['object']
     return upload_request
+
+
+def calculate_md5(key):
+    """ Calculates an MD5 digest for an object. """
+    md5_hash = hashlib.md5()
+    while True:
+        object_data = key.read(size=config['READ_SIZE'])
+        if len(object_data) == 0:
+            break
+        md5_hash.update(object_data)
+    return md5_hash.digest()
+
+
+def set_object_metadata(key, data):
+    """ Updates object metadata. """
+    bucket = riak_connection.bucket(config['OBJECT_METADATA_BUCKET'])
+    metadata_key = '/'.join([key.name, key.bucket.name])
+    obj = bucket.get(metadata_key)
+    if obj.exists:
+        # Clear any existing metadata from previous objects with the same key.
+        obj.data.clear()
+        obj.data.update(data)
+        obj.store()
+        return
+    bucket.new(metadata_key, data=data).store()
+
+
+def get_object_metadata(key):
+    """ Fetches object metadata. """
+    bucket = riak_connection.bucket(config['OBJECT_METADATA_BUCKET'])
+    metadata_key = '/'.join([key.name, key.bucket.name])
+    obj = bucket.get(metadata_key)
+    return obj.data or {}
+
+
+def delete_object_metadata(key):
+    """ Deletes an object's metadata. """
+    bucket = riak_connection.bucket(config['OBJECT_METADATA_BUCKET'])
+    metadata_key = '/'.join([key.name, key.bucket.name])
+    bucket.delete(metadata_key)

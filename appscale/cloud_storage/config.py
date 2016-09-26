@@ -12,6 +12,9 @@ TOKEN_BUCKET = 'appscale-cloud-storage-auth-tokens'
 # A reserved Riak KV bucket used for storing upload session state.
 UPLOAD_SESSION_BUCKET = 'appscale-cloud-storage-upload-ids'
 
+# A reserved Riak KV bucket used for storing upload session state.
+OBJECT_METADATA_BUCKET = 'appscale-cloud-storage-object-metadata'
+
 # The location of a Riak KV installation.
 RIAK_KV_HOST = 'localhost'
 
