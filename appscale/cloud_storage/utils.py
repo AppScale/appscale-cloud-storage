@@ -15,11 +15,11 @@ active_tokens = {}
 # A cache used to store active S3 connections.
 s3_connection_cache = {}
 
-# These global variables are defined when the app starts.
-metadata_bucket = None  # The Riak KV bucket that stores bucket metadata.
-riak_connection = None  # A Riak KV client connection.
-token_bucket = None  # The Riak KV bucket that stores auth tokens.
-upload_session_bucket = None  # The Riak KV bucket that stores session data.
+# A Riak KV client connection.
+riak_connection = None
+
+# This configuration is defined when the app starts.
+config = None
 
 
 class TokenExpired(Exception):
@@ -57,7 +57,7 @@ def error(message, code=HTTP_ERROR):
 
 def index_bucket(bucket_name, project):
     """ Associates a bucket with a project. """
-    bucket = riak_connection.bucket(metadata_bucket)
+    bucket = riak_connection.bucket(config['METADATA_BUCKET'])
     obj = RiakObject(riak_connection, bucket, bucket_name)
     obj.add_index('project', project)
     obj.store()
@@ -65,7 +65,7 @@ def index_bucket(bucket_name, project):
 
 def query_buckets(project):
     """ Fetches a set of bucket names in a given project. """
-    bucket = riak_connection.bucket(metadata_bucket)
+    bucket = riak_connection.bucket(config['METADATA_BUCKET'])
     return set(bucket.get_index(project).results)
 
 
@@ -78,7 +78,7 @@ def set_token(token, user_id, expiration):
         aws_creds: A dictionary containing AWS credentials.
         expiration: A datetime object specifying the token expiration.
     """
-    bucket = riak_connection.bucket(token_bucket)
+    bucket = riak_connection.bucket(config['TOKEN_BUCKET'])
     # TODO: Clean up expired tokens.
     bucket.new(token, {'user': user_id, 'expiration': expiration.isoformat()})
     active_tokens[token] = {'user': user_id, 'expiration': expiration}
@@ -100,7 +100,7 @@ def get_user(token):
         raise TokenExpired('Token expired.')
 
     # Try to fetch the token from Riak KV.
-    bucket = riak_connection.bucket(token_bucket)
+    bucket = riak_connection.bucket(config['TOKEN_BUCKET'])
     token = bucket.get(token)
     if not token.exists:
         raise TokenNotFound('Token not found.')
@@ -122,7 +122,7 @@ def set_upload_state(upload_id, state):
 
 def update_upload_state(upload_id, state):
     """ Updates state for a given upload ID. """
-    bucket = riak_connection.bucket(upload_session_bucket)
+    bucket = riak_connection.bucket(config['UPLOAD_SESSION_BUCKET'])
     obj = bucket.get(upload_id)
     obj.data.update(state)
     obj.store()
@@ -130,7 +130,7 @@ def update_upload_state(upload_id, state):
 
 def get_upload_state(upload_id):
     """ Fetches state for a given upload ID. """
-    bucket = riak_connection.bucket(upload_session_bucket)
+    bucket = riak_connection.bucket(config['UPLOAD_SESSION_BUCKET'])
     state = bucket.get(upload_id)
     if not state.exists:
         raise UploadNotFound('Invalid upload_id.')
