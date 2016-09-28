@@ -205,8 +205,8 @@ def completed_bytes(completed_ranges):
     Args:
         completed_ranges: A tuple of tuples specifying the start and end bytes
             of completed parts.
-        Returns:
-            An integer specifying the total number of completed bytes.
+    Returns:
+        An integer specifying the total number of completed bytes.
     """
     return sum([end - start + 1 for start, end in completed_ranges])
 
