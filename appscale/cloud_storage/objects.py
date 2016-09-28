@@ -74,10 +74,10 @@ def object_info(key, last_modified=None):
     return obj
 
 
-def read_object(key, size):
+def read_object(key, chunk_size):
     key.open_read()
     while True:
-        response = key.read(size=size)
+        response = key.read(size=chunk_size)
         if len(response) == 0:
             key.close()
             break
