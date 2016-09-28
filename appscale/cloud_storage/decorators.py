@@ -16,8 +16,13 @@ from .utils import TokenExpired
 
 
 def assert_required(*required):
-    """ A decorator that ensures required parameters are specified. It passes
-    them as keyword arguments. """
+    """ A decorator that ensures required parameters are specified.
+
+    Args:
+        Any number of strings specifying required parameters.
+    Returns:
+        The given function called with the parameters as keyword arguments.
+    """
     def wrapper(function):
         @functools.wraps(function)
         def wrapped_function(*args, **kwargs):
@@ -35,7 +40,11 @@ def assert_required(*required):
 
 
 def assert_unsupported(*unsupported):
-    """ A decorator that ensures no unsupported parameters are defined. """
+    """ A decorator that ensures no unsupported parameters are defined.
+
+    Args:
+        Any number of strings specifying unsupported parameters.
+    """
     def wrapper(function):
         @functools.wraps(function)
         def wrapped_function(*args, **kwargs):
@@ -50,7 +59,11 @@ def assert_unsupported(*unsupported):
 
 
 def authenticate(function):
-    """ A decorator that authenticates a request and provides a connection. """
+    """ A decorator that authenticates a request and provides a connection.
+
+    Args:
+        function: Any function that requires authentication.
+    """
     @functools.wraps(function)
     def decorated_function(*args, **kwargs):
         try:

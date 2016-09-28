@@ -20,7 +20,14 @@ from .utils import query_buckets
 @assert_unsupported('maxResults', 'pageToken', 'prefix')
 @assert_required('project')
 def list_buckets(project, conn):
-    """ Retrieves a list of buckets for the given project. """
+    """ Retrieves a list of buckets for the given project.
+
+    Args:
+        project: A string specifying a project ID.
+        conn: An S3Connection instance.
+    Returns:
+        A JSON string representing a list of buckets.
+    """
     projection = request.args.get('projection') or 'noAcl'
     if projection != 'noAcl':
         return error('projection: {} not supported.'.format(projection),
@@ -54,7 +61,14 @@ def list_buckets(project, conn):
                     'projection')
 @assert_required('project')
 def insert_bucket(project, conn):
-    """ Creates a new bucket. """
+    """ Creates a new bucket.
+
+    Args:
+        project: A string specifying a project ID.
+        conn: An S3Connection instance.
+    Returns:
+        A JSON string representing a bucket.
+    """
     bucket_info = request.get_json()
     # TODO: Do the following lookup and create under a lock.
     if conn.lookup(bucket_info['name']) is not None:
@@ -89,7 +103,14 @@ def insert_bucket(project, conn):
 @assert_unsupported('ifMetagenerationMatch', 'ifMetagenerationNotMatch',
                     'fields')
 def get_bucket(bucket_name, conn):
-    """ Returns metadata for the specified bucket. """
+    """ Returns metadata for the specified bucket.
+
+    Args:
+        bucket_name: A string specifying a bucket name.
+        conn: An S3Connection instance.
+    Returns:
+        A JSON string representing a bucket.
+    """
     projection = request.args.get('projection') or 'noAcl'
     if projection != 'noAcl':
         return error('projection: {} not supported.'.format(projection),
@@ -116,7 +137,12 @@ def get_bucket(bucket_name, conn):
 @authenticate
 @assert_unsupported('ifMetagenerationMatch', 'ifMetagenerationNotMatch')
 def delete_bucket(bucket_name, conn):
-    """ Deletes an empty bucket. """
+    """ Deletes an empty bucket.
+
+    Args:
+        bucket_name: A string specifying a bucket name.
+        conn: An S3Connection instance.
+    """
     try:
         bucket = conn.get_bucket(bucket_name)
     except S3ResponseError:

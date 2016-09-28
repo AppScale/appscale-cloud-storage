@@ -27,9 +27,7 @@ utils.admin_connection = S3Connection(
     calling_format=OrdinaryCallingFormat()
 )
 utils.riak_connection = RiakClient(nodes=app.config['RIAK_KV_NODES'])
-utils.metadata_bucket = app.config['METADATA_BUCKET']
-utils.token_bucket = app.config['TOKEN_BUCKET']
-utils.upload_session_bucket = app.config['UPLOAD_SESSION_BUCKET']
+utils.config = app.config
 
 
 # Buckets

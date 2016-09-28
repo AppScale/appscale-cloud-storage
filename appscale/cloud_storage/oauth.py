@@ -15,7 +15,11 @@ from .utils import set_token
 
 
 def get_token():
-    """ Creates an authentication token for valid service credentials. """
+    """ Creates an authentication token for valid service credentials.
+
+    Returns:
+        A JSON string containing a bearer token.
+    """
     config = current_app.config
     try:
         jwt = request.form['assertion']

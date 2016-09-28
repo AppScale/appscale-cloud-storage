@@ -1,4 +1,5 @@
 import base64
+import binascii
 import datetime
 import dateutil.parser
 import gzip
@@ -23,18 +24,30 @@ from .constants import HTTP_RESUME_INCOMPLETE
 from .decorators import assert_required
 from .decorators import assert_unsupported
 from .decorators import authenticate
+from .utils import calculate_md5
 from .utils import completed_bytes
+from .utils import delete_object_metadata
 from .utils import error
 from .utils import get_completed_ranges
+from .utils import get_object_metadata
 from .utils import get_request_from_state
 from .utils import get_upload_state
-from .utils import set_upload_state
-from .utils import update_upload_state
+from .utils import set_object_metadata
+from .utils import upsert_upload_state
 from .utils import UploadNotFound
 from .utils import UploadStates
 
 
 def object_info(key, last_modified=None):
+    """ Generates a dictionary representing a GCS object.
+
+    Args:
+        key: A boto Key object.
+        last_modified: A datetime object specifying when the object was
+            last modified.
+    Returns:
+        A JSON-safe dictionary representing the object.
+    """
     if last_modified is None:
         last_modified = dateutil.parser.parse(key.last_modified)
 
@@ -55,18 +68,31 @@ def object_info(key, last_modified=None):
         'mediaLink': request.url_root[:-1] + object_url + '?alt=media'
     }
 
-    # Multipart uploads do not have MD5 metadata.
-    if '-' not in key.etag:
+    # Multipart uploads do not have MD5 metadata by default.
+    if key.md5 is not None:
+        md5 = binascii.unhexlify(key.md5)
+        obj['md5Hash'] = base64.b64encode(md5).decode()
+    elif '-' not in key.etag:
         md5 = bytearray.fromhex(key.etag[1:-1])
         obj['md5Hash'] = base64.b64encode(md5).decode()
+    else:
+        metadata = get_object_metadata(key)
+        obj.update(metadata)
 
+    current_app.logger.debug('obj: {}'.format(obj))
     return obj
 
 
-def read_object(key, size):
+def read_object(key, chunk_size):
+    """ A generator that fetches object data.
+
+    Args:
+        key: A boto Key object.
+        chunk_size: An integer specifying the chunk size to use when fetching.
+    """
     key.open_read()
     while True:
-        response = key.read(size=size)
+        response = key.read(size=chunk_size)
         if len(response) == 0:
             key.close()
             break
@@ -75,7 +101,14 @@ def read_object(key, size):
 
 @authenticate
 def list_objects(bucket_name, conn):
-    """ Retrieves a list of objects. """
+    """ Retrieves a list of objects.
+
+    Args:
+        bucket_name: A string specifying a bucket name.
+        conn: An S3Connection instance.
+    Returns:
+        A JSON string representing an object.
+    """
     # TODO: Get bucket ACL.
     response = {'kind': 'storage#objects'}
     bucket = conn.get_bucket(bucket_name)
@@ -89,7 +122,13 @@ def list_objects(bucket_name, conn):
 
 @authenticate
 def delete_object(bucket_name, object_name, conn):
-    """ Deletes an object and its metadata. """
+    """ Deletes an object and its metadata.
+
+    Args:
+        bucket_name: A string specifying a bucket name.
+        object_name: A string specifying an object name.
+        conn: An S3Connection instance.
+    """
     try:
         bucket = conn.get_bucket(bucket_name)
     except S3ResponseError:
@@ -100,6 +139,7 @@ def delete_object(bucket_name, object_name, conn):
     if key is None:
         return error('Not Found', HTTP_NOT_FOUND)
 
+    delete_object_metadata(key)
     key.delete()
     return '', HTTP_NO_CONTENT
 
@@ -108,7 +148,15 @@ def delete_object(bucket_name, object_name, conn):
 @assert_unsupported('generation', 'ifGenerationMatch', 'ifGenerationNotMatch',
                     'ifMetagenerationMatch', 'ifMetagenerationNotMatch')
 def get_object(bucket_name, object_name, conn):
-    """ Retrieves an object or its metadata. """
+    """ Retrieves an object or its metadata.
+
+    Args:
+        bucket_name: A string specifying a bucket_name.
+        object_name: A string specifying an object name.
+        conn: An S3Connection instance.
+    Returns:
+        A JSON string representing an object.
+    """
     projection = request.args.get('projection') or 'noAcl'
     if projection != 'noAcl':
         return error('projection: {} not supported.'.format(projection),
@@ -135,6 +183,15 @@ def get_object(bucket_name, object_name, conn):
 @authenticate
 @assert_required('uploadType')
 def insert_object(bucket_name, upload_type, conn):
+    """ Stores an object or starts a resumable upload.
+
+    Args:
+        bucket_name: A string specifying a bucket name.
+        object_name: A string specifying an object name.
+        conn: An S3Connection instance.
+    Returns:
+        A JSON string representing an object.
+    """
     bucket = conn.get_bucket(bucket_name)
 
     object_name = None
@@ -173,7 +230,7 @@ def insert_object(bucket_name, upload_type, conn):
             new_upload_id, object_name))
 
         state = {'object': object_name, 'status': UploadStates.NEW}
-        set_upload_state(new_upload_id, state)
+        upsert_upload_state(new_upload_id, state)
 
         upload_url = url_for('insert_object', bucket_name=bucket_name)
         redirect = request.url_root[:-1] + upload_url + \
@@ -190,6 +247,15 @@ def insert_object(bucket_name, upload_type, conn):
 @authenticate
 @assert_required('upload_id')
 def resumable_insert(bucket_name, upload_id, conn):
+    """ Stores all or part of an object.
+
+    Args:
+        bucket_name: A string specifying a bucket name.
+        object_name: A string specifying an object name.
+        conn: An S3Connection instance.
+    Returns:
+        A JSON string representing an object.
+    """
     try:
         upload_state = get_upload_state(upload_id)
     except UploadNotFound as state_error:
@@ -252,12 +318,20 @@ def resumable_insert(bucket_name, upload_id, conn):
 
     completed_ranges = get_completed_ranges(upload_request)
     if completed_bytes(completed_ranges) == total_length:
+        # Ideally, the MD5 would be calculated before the request is finalized,
+        # but there doesn't seem to be a way to fetch part data beforehand.
         upload_request.complete_upload()
-        # TODO: Clean up old state info after a week.
+        key = bucket.get_key(object_name)
+        md5 = calculate_md5(key)
+
+        # TODO: Clean up old upload state info after a week.
         new_state = {'status': UploadStates.COMPLETE, 'object': object_name}
-        update_upload_state(upload_id, new_state)
-        obj = object_info(bucket.get_key(object_name))
-        return Response(json.dumps(obj), mimetype='application/json')
+        upsert_upload_state(upload_id, new_state)
+
+        key.md5 = binascii.hexlify(md5)
+        set_object_metadata(key, {'md5Hash': base64.b64encode(md5).decode()})
+        return Response(json.dumps(object_info(key)),
+                        mimetype='application/json')
 
     response = Response('', status=HTTP_RESUME_INCOMPLETE)
     range_strings = ['{}-{}'.format(start, end)
