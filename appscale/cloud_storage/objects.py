@@ -39,6 +39,15 @@ from .utils import UploadStates
 
 
 def object_info(key, last_modified=None):
+    """ Generates a dictionary representing a GCS object.
+
+    Args:
+        key: A boto Key object.
+        last_modified: A datetime object specifying when the object was
+            last modified.
+    Returns:
+        A JSON-safe dictionary representing the object.
+    """
     if last_modified is None:
         last_modified = dateutil.parser.parse(key.last_modified)
 
@@ -75,6 +84,12 @@ def object_info(key, last_modified=None):
 
 
 def read_object(key, chunk_size):
+    """ A generator that fetches object data.
+
+    Args:
+        key: A boto Key object.
+        chunk_size: An integer specifying the chunk size to use when fetching.
+    """
     key.open_read()
     while True:
         response = key.read(size=chunk_size)
@@ -86,7 +101,14 @@ def read_object(key, chunk_size):
 
 @authenticate
 def list_objects(bucket_name, conn):
-    """ Retrieves a list of objects. """
+    """ Retrieves a list of objects.
+
+    Args:
+        bucket_name: A string specifying a bucket name.
+        conn: An S3Connection instance.
+    Returns:
+        A JSON string representing an object.
+    """
     # TODO: Get bucket ACL.
     response = {'kind': 'storage#objects'}
     bucket = conn.get_bucket(bucket_name)
@@ -100,7 +122,13 @@ def list_objects(bucket_name, conn):
 
 @authenticate
 def delete_object(bucket_name, object_name, conn):
-    """ Deletes an object and its metadata. """
+    """ Deletes an object and its metadata.
+
+    Args:
+        bucket_name: A string specifying a bucket name.
+        object_name: A string specifying an object name.
+        conn: An S3Connection instance.
+    """
     try:
         bucket = conn.get_bucket(bucket_name)
     except S3ResponseError:
@@ -120,7 +148,15 @@ def delete_object(bucket_name, object_name, conn):
 @assert_unsupported('generation', 'ifGenerationMatch', 'ifGenerationNotMatch',
                     'ifMetagenerationMatch', 'ifMetagenerationNotMatch')
 def get_object(bucket_name, object_name, conn):
-    """ Retrieves an object or its metadata. """
+    """ Retrieves an object or its metadata.
+
+    Args:
+        bucket_name: A string specifying a bucket_name.
+        object_name: A string specifying an object name.
+        conn: An S3Connection instance.
+    Returns:
+        A JSON string representing an object.
+    """
     projection = request.args.get('projection') or 'noAcl'
     if projection != 'noAcl':
         return error('projection: {} not supported.'.format(projection),
@@ -147,7 +183,15 @@ def get_object(bucket_name, object_name, conn):
 @authenticate
 @assert_required('uploadType')
 def insert_object(bucket_name, upload_type, conn):
-    """ Stores an object or starts a resumable upload. """
+    """ Stores an object or starts a resumable upload.
+
+    Args:
+        bucket_name: A string specifying a bucket name.
+        object_name: A string specifying an object name.
+        conn: An S3Connection instance.
+    Returns:
+        A JSON string representing an object.
+    """
     bucket = conn.get_bucket(bucket_name)
 
     object_name = None
@@ -203,7 +247,15 @@ def insert_object(bucket_name, upload_type, conn):
 @authenticate
 @assert_required('upload_id')
 def resumable_insert(bucket_name, upload_id, conn):
-    """ Stores all or part of an object. """
+    """ Stores all or part of an object.
+
+    Args:
+        bucket_name: A string specifying a bucket name.
+        object_name: A string specifying an object name.
+        conn: An S3Connection instance.
+    Returns:
+        A JSON string representing an object.
+    """
     try:
         upload_state = get_upload_state(upload_id)
     except UploadNotFound as state_error:
