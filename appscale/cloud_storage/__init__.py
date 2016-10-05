@@ -43,9 +43,9 @@ app.add_url_rule('/storage/v1/b/<bucket_name>',
 # Objects
 app.add_url_rule('/storage/v1/b/<bucket_name>/o',
                  view_func=objects.list_objects, methods=['GET'])
-app.add_url_rule('/storage/v1/b/<bucket_name>/o/<object_name>',
+app.add_url_rule('/storage/v1/b/<bucket_name>/o/<path:object_name>',
                  view_func=objects.get_object, methods=['GET'])
-app.add_url_rule('/storage/v1/b/<bucket_name>/o/<object_name>',
+app.add_url_rule('/storage/v1/b/<bucket_name>/o/<path:object_name>',
                  view_func=objects.delete_object, methods=['DELETE'])
 app.add_url_rule('/upload/storage/v1/b/<bucket_name>/o',
                  view_func=objects.insert_object, methods=['POST'])
