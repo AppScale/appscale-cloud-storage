@@ -68,7 +68,8 @@ def object_info(key, last_modified=None):
         'bucket': key.bucket.name,
         'generation': str(last_mod_usec),
         'etag': key.etag[1:-1],
-        'mediaLink': request.url_root[:-1] + object_url + '?alt=media'
+        'mediaLink': request.url_root[:-1] + object_url + '?alt=media',
+        'size': str(key.size)
     }
 
     # Multipart uploads do not have MD5 metadata by default.
