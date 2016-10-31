@@ -229,12 +229,8 @@ def insert_object(bucket_name, upload_type, conn):
         A JSON string representing an object.
     """
     bucket = conn.get_bucket(bucket_name)
-
-    object_name = None
-    object_name = request.args.get('name') or object_name
-
-    upload_id = None
-    upload_id = request.args.get('upload_id') or upload_id
+    object_name = request.args.get('name', default=None)
+    upload_id = request.args.get('upload_id', default=None)
 
     if upload_type == 'media':
         if object_name is None:
