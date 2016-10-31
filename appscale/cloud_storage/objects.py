@@ -20,6 +20,8 @@ from .constants import HTTP_BAD_REQUEST
 from .constants import HTTP_NO_CONTENT
 from .constants import HTTP_NOT_FOUND
 from .constants import HTTP_NOT_IMPLEMENTED
+from .constants import HTTP_OK
+from .constants import HTTP_PARTIAL_CONTENT
 from .constants import HTTP_RESUME_INCOMPLETE
 from .decorators import assert_required
 from .decorators import assert_unsupported
@@ -90,13 +92,12 @@ def read_object(key, chunk_size):
         key: A boto Key object.
         chunk_size: An integer specifying the chunk size to use when fetching.
     """
-    key.open_read()
     while True:
-        response = key.read(size=chunk_size)
-        if len(response) == 0:
+        data = key.resp.read(chunk_size)
+        if not data:
             key.close()
             break
-        yield response
+        yield data
 
 
 @authenticate
@@ -162,19 +163,44 @@ def get_object(bucket_name, object_name, conn):
         return error('projection: {} not supported.'.format(projection),
                      HTTP_NOT_IMPLEMENTED)
 
-    alt = request.args.get('alt')
-    if alt is not None and alt != 'media':
+    alt = request.args.get('alt', default='json')
+    if alt not in ['json', 'media']:
         return error('alt: {} not supported.'.format(projection),
                      HTTP_BAD_REQUEST)
 
-    bucket = conn.get_bucket(bucket_name)
+    try:
+        bucket = conn.get_bucket(bucket_name)
+    except S3ResponseError as s3_error:
+        if s3_error.status == HTTP_NOT_FOUND:
+            return error('Not Found', HTTP_NOT_FOUND)
+        raise s3_error
     key = bucket.get_key(object_name)
 
     if key is None:
         return error('Not Found', HTTP_NOT_FOUND)
 
     if alt == 'media':
-        return Response(read_object(key, current_app.config['READ_SIZE']))
+        boto_headers = None
+        content_length = key.size
+        range = '0-{}'.format(content_length)
+        status_code = HTTP_OK
+        if 'Range' in request.headers:
+            boto_headers = {'Range': request.headers['Range']}
+            range = request.headers['Range'].split('=')[-1]
+            start_byte, end_byte = range.split('-')
+            content_length = int(end_byte) - int(start_byte) + 1
+            status_code = HTTP_PARTIAL_CONTENT
+
+        key.open_read(headers=boto_headers)
+        response = Response(
+            response=read_object(key, current_app.config['READ_SIZE']),
+            status=status_code
+        )
+        response.headers['Content-Length'] = content_length
+        response.headers['Content-Range'] = 'bytes {}/{}'.format(
+            range, key.size)
+        response.headers['Content-Type'] = key.content_type
+        return response
 
     obj = object_info(key)
     return Response(json.dumps(obj), mimetype='application/json')
