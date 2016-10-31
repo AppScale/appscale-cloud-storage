@@ -114,7 +114,13 @@ def list_objects(bucket_name, conn):
     """
     # TODO: Get bucket ACL.
     response = {'kind': 'storage#objects'}
-    bucket = conn.get_bucket(bucket_name)
+    try:
+        bucket = conn.get_bucket(bucket_name)
+    except S3ResponseError as s3_error:
+        if s3_error.status == HTTP_NOT_FOUND:
+            return error('Not Found', HTTP_NOT_FOUND)
+        raise s3_error
+
     keys = tuple(bucket.list())
     if not keys:
         return json.dumps(response)
@@ -134,8 +140,10 @@ def delete_object(bucket_name, object_name, conn):
     """
     try:
         bucket = conn.get_bucket(bucket_name)
-    except S3ResponseError:
-        return error('Not Found', HTTP_NOT_FOUND)
+    except S3ResponseError as s3_error:
+        if s3_error.status == HTTP_NOT_FOUND:
+            return error('Not Found', HTTP_NOT_FOUND)
+        raise s3_error
 
     # TODO: Do the following lookup and delete under a lock.
     key = bucket.get_key(object_name)
