@@ -6,6 +6,7 @@ import gzip
 import json
 import math
 import random
+import re
 
 from boto.exception import S3ResponseError
 from boto.s3.key import Key
@@ -265,7 +266,27 @@ def insert_object(bucket_name, upload_type, conn):
         response.headers['Location'] = redirect
         return response
     if upload_type == 'multipart':
-        return '', HTTP_NOT_IMPLEMENTED
+        try:
+            match = re.match(r"^multipart/related; boundary='(.*)'$",
+                             request.headers['Content-Type'])
+            boundary = match.group(1)
+        except (KeyError, AttributeError):
+            return error('Invalid Content-Type.', HTTP_BAD_REQUEST)
+        parts = request.data.split(b'--' + boundary.encode())
+        metadata = json.loads(parts[1].decode().splitlines()[-1])
+        file_data = parts[2].split(b'\n\n', maxsplit=1)[-1]
+        if file_data.endswith(b'\n'):
+            file_data = file_data[:-1]
+
+        current_app.logger.debug('metadata: {}'.format(metadata))
+        object_name = metadata['name']
+        key = Key(bucket, object_name)
+        if 'contentType' in metadata:
+            key.set_metadata('Content-Type', metadata['contentType'])
+        key.set_contents_from_string(file_data)
+        obj = object_info(
+            key, last_modified=datetime.datetime.now(datetime.timezone.utc))
+        return Response(json.dumps(obj), mimetype='application/json')
 
     return error('Invalid uploadType.', HTTP_BAD_REQUEST)
 
