@@ -17,7 +17,7 @@ from .utils import query_buckets
 
 
 @authenticate
-@assert_unsupported('maxResults', 'pageToken', 'prefix')
+@assert_unsupported('prefix')
 @assert_required('project')
 def list_buckets(project, conn):
     """ Retrieves a list of buckets for the given project.
@@ -28,10 +28,13 @@ def list_buckets(project, conn):
     Returns:
         A JSON string representing a list of buckets.
     """
-    projection = request.args.get('projection') or 'noAcl'
+    projection = request.args.get('projection', default='noAcl')
     if projection != 'noAcl':
         return error('projection: {} not supported.'.format(projection),
                      HTTP_NOT_IMPLEMENTED)
+
+    max_results = request.args.get('maxResults', type=int)
+    page_token = request.args.get('pageToken')
 
     index = query_buckets(project)
 
@@ -40,6 +43,23 @@ def list_buckets(project, conn):
                     if bucket.name in index)
     if not buckets:
         return json.dumps(response)
+
+    if page_token is not None:
+        start_index = 0
+        for bucket in buckets:
+            start_index += 1
+            if bucket == page_token:
+                break
+        buckets = buckets[start_index:]
+
+    # Number of results that would be returned if maxResults wasn't defined.
+    total_results = len(buckets)
+
+    if max_results is not None:
+        buckets = buckets[:max_results]
+
+    if len(buckets) < total_results:
+        response['nextPageToken'] = buckets[-1].name
 
     items = []
     for bucket in buckets:
