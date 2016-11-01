@@ -123,7 +123,7 @@ def list_objects(bucket_name, conn):
 
     keys = tuple(bucket.list())
     if not keys:
-        return json.dumps(response)
+        return Response(json.dumps(response), mimetype='application/json')
 
     response['items'] = [object_info(key) for key in keys]
     return Response(json.dumps(response), mimetype='application/json')

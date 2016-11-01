@@ -42,7 +42,7 @@ def list_buckets(project, conn):
     buckets = tuple(bucket for bucket in conn.get_all_buckets()
                     if bucket.name in index)
     if not buckets:
-        return json.dumps(response)
+        return Response(json.dumps(response), mimetype='application/json')
 
     if page_token is not None:
         start_index = 0
