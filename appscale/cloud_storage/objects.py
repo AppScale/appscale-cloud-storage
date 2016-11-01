@@ -192,14 +192,19 @@ def get_object(bucket_name, object_name, conn):
     if alt == 'media':
         boto_headers = None
         content_length = key.size
-        range = '0-{}'.format(content_length)
+        response_range = None
         status_code = HTTP_OK
         if 'Range' in request.headers:
             boto_headers = {'Range': request.headers['Range']}
-            range = request.headers['Range'].split('=')[-1]
-            start_byte, end_byte = range.split('-')
-            content_length = int(end_byte) - int(start_byte) + 1
+            requested_range = request.headers['Range'].split('=')[-1]
+            start_byte, end_byte = (int(val) for val
+                                    in requested_range.split('-'))
+            requested_length = end_byte - start_byte + 1
+            content_length = min(key.size, requested_length)
             status_code = HTTP_PARTIAL_CONTENT
+            response_end_byte = min(end_byte, key.size - 1)
+            response_range = 'bytes {}-{}/{}'.format(
+                start_byte, response_end_byte, key.size)
 
         key.open_read(headers=boto_headers)
         response = Response(
@@ -207,8 +212,8 @@ def get_object(bucket_name, object_name, conn):
             status=status_code
         )
         response.headers['Content-Length'] = content_length
-        response.headers['Content-Range'] = 'bytes {}/{}'.format(
-            range, key.size)
+        if response_range is not None:
+            response.headers['Content-Range'] = response_range
         response.headers['Content-Type'] = key.content_type
         return response
 
