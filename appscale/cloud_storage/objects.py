@@ -6,6 +6,7 @@ import gzip
 import json
 import math
 import random
+import re
 
 from boto.exception import S3ResponseError
 from boto.s3.key import Key
@@ -20,6 +21,8 @@ from .constants import HTTP_BAD_REQUEST
 from .constants import HTTP_NO_CONTENT
 from .constants import HTTP_NOT_FOUND
 from .constants import HTTP_NOT_IMPLEMENTED
+from .constants import HTTP_OK
+from .constants import HTTP_PARTIAL_CONTENT
 from .constants import HTTP_RESUME_INCOMPLETE
 from .decorators import assert_required
 from .decorators import assert_unsupported
@@ -65,7 +68,8 @@ def object_info(key, last_modified=None):
         'bucket': key.bucket.name,
         'generation': str(last_mod_usec),
         'etag': key.etag[1:-1],
-        'mediaLink': request.url_root[:-1] + object_url + '?alt=media'
+        'mediaLink': request.url_root[:-1] + object_url + '?alt=media',
+        'size': str(key.size)
     }
 
     # Multipart uploads do not have MD5 metadata by default.
@@ -90,13 +94,12 @@ def read_object(key, chunk_size):
         key: A boto Key object.
         chunk_size: An integer specifying the chunk size to use when fetching.
     """
-    key.open_read()
     while True:
-        response = key.read(size=chunk_size)
-        if len(response) == 0:
+        data = key.resp.read(chunk_size)
+        if not data:
             key.close()
             break
-        yield response
+        yield data
 
 
 @authenticate
@@ -111,10 +114,16 @@ def list_objects(bucket_name, conn):
     """
     # TODO: Get bucket ACL.
     response = {'kind': 'storage#objects'}
-    bucket = conn.get_bucket(bucket_name)
+    try:
+        bucket = conn.get_bucket(bucket_name)
+    except S3ResponseError as s3_error:
+        if s3_error.status == HTTP_NOT_FOUND:
+            return error('Not Found', HTTP_NOT_FOUND)
+        raise s3_error
+
     keys = tuple(bucket.list())
     if not keys:
-        return json.dumps(response)
+        return Response(json.dumps(response), mimetype='application/json')
 
     response['items'] = [object_info(key) for key in keys]
     return Response(json.dumps(response), mimetype='application/json')
@@ -131,8 +140,10 @@ def delete_object(bucket_name, object_name, conn):
     """
     try:
         bucket = conn.get_bucket(bucket_name)
-    except S3ResponseError:
-        return error('Not Found', HTTP_NOT_FOUND)
+    except S3ResponseError as s3_error:
+        if s3_error.status == HTTP_NOT_FOUND:
+            return error('Not Found', HTTP_NOT_FOUND)
+        raise s3_error
 
     # TODO: Do the following lookup and delete under a lock.
     key = bucket.get_key(object_name)
@@ -162,19 +173,49 @@ def get_object(bucket_name, object_name, conn):
         return error('projection: {} not supported.'.format(projection),
                      HTTP_NOT_IMPLEMENTED)
 
-    alt = request.args.get('alt')
-    if alt is not None and alt != 'media':
+    alt = request.args.get('alt', default='json')
+    if alt not in ['json', 'media']:
         return error('alt: {} not supported.'.format(projection),
                      HTTP_BAD_REQUEST)
 
-    bucket = conn.get_bucket(bucket_name)
+    try:
+        bucket = conn.get_bucket(bucket_name)
+    except S3ResponseError as s3_error:
+        if s3_error.status == HTTP_NOT_FOUND:
+            return error('Not Found', HTTP_NOT_FOUND)
+        raise s3_error
     key = bucket.get_key(object_name)
 
     if key is None:
         return error('Not Found', HTTP_NOT_FOUND)
 
     if alt == 'media':
-        return Response(read_object(key, current_app.config['READ_SIZE']))
+        boto_headers = None
+        content_length = key.size
+        response_range = None
+        status_code = HTTP_OK
+        if 'Range' in request.headers:
+            boto_headers = {'Range': request.headers['Range']}
+            requested_range = request.headers['Range'].split('=')[-1]
+            start_byte, end_byte = (int(val) for val
+                                    in requested_range.split('-'))
+            requested_length = end_byte - start_byte + 1
+            content_length = min(key.size, requested_length)
+            status_code = HTTP_PARTIAL_CONTENT
+            response_end_byte = min(end_byte, key.size - 1)
+            response_range = 'bytes {}-{}/{}'.format(
+                start_byte, response_end_byte, key.size)
+
+        key.open_read(headers=boto_headers)
+        response = Response(
+            response=read_object(key, current_app.config['READ_SIZE']),
+            status=status_code
+        )
+        response.headers['Content-Length'] = content_length
+        if response_range is not None:
+            response.headers['Content-Range'] = response_range
+        response.headers['Content-Type'] = key.content_type
+        return response
 
     obj = object_info(key)
     return Response(json.dumps(obj), mimetype='application/json')
@@ -193,12 +234,8 @@ def insert_object(bucket_name, upload_type, conn):
         A JSON string representing an object.
     """
     bucket = conn.get_bucket(bucket_name)
-
-    object_name = None
-    object_name = request.args.get('name') or object_name
-
-    upload_id = None
-    upload_id = request.args.get('upload_id') or upload_id
+    object_name = request.args.get('name', default=None)
+    upload_id = request.args.get('upload_id', default=None)
 
     if upload_type == 'media':
         if object_name is None:
@@ -239,7 +276,27 @@ def insert_object(bucket_name, upload_type, conn):
         response.headers['Location'] = redirect
         return response
     if upload_type == 'multipart':
-        return '', HTTP_NOT_IMPLEMENTED
+        try:
+            match = re.match(r"^multipart/related; boundary='(.*)'$",
+                             request.headers['Content-Type'])
+            boundary = match.group(1)
+        except (KeyError, AttributeError):
+            return error('Invalid Content-Type.', HTTP_BAD_REQUEST)
+        parts = request.data.split(b'--' + boundary.encode())
+        metadata = json.loads(parts[1].decode().splitlines()[-1])
+        file_data = parts[2].split(b'\n\n', maxsplit=1)[-1]
+        if file_data.endswith(b'\n'):
+            file_data = file_data[:-1]
+
+        current_app.logger.debug('metadata: {}'.format(metadata))
+        object_name = metadata['name']
+        key = Key(bucket, object_name)
+        if 'contentType' in metadata:
+            key.set_metadata('Content-Type', metadata['contentType'])
+        key.set_contents_from_string(file_data)
+        obj = object_info(
+            key, last_modified=datetime.datetime.now(datetime.timezone.utc))
+        return Response(json.dumps(obj), mimetype='application/json')
 
     return error('Invalid uploadType.', HTTP_BAD_REQUEST)
 
