@@ -200,7 +200,8 @@ def get_object(bucket_name, object_name, conn):
             start_byte, end_byte = (int(val) for val
                                     in requested_range.split('-'))
             requested_length = end_byte - start_byte + 1
-            content_length = min(key.size, requested_length)
+            remaining_length = key.size - start_byte
+            content_length = min(remaining_length, requested_length)
             status_code = HTTP_PARTIAL_CONTENT
             response_end_byte = min(end_byte, key.size - 1)
             response_range = 'bytes {}-{}/{}'.format(
