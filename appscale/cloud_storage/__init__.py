@@ -8,8 +8,10 @@ from appscale.cloud_storage import objects
 from appscale.cloud_storage import utils
 from flask import Flask
 from riak import RiakClient
+from werkzeug.contrib.fixers import ProxyFix
 
 app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app)
 app.config.from_object('appscale.cloud_storage.config')
 
 try:
