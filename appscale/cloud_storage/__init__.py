@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 
+import psycopg2
 from boto.s3.connection import OrdinaryCallingFormat
 from boto.s3.connection import S3Connection
+from flask import Flask
+
 from appscale.cloud_storage import buckets
 from appscale.cloud_storage import oauth
 from appscale.cloud_storage import objects
 from appscale.cloud_storage import utils
-from flask import Flask
-from riak import RiakClient
 
 app = Flask(__name__)
 app.config.from_object('appscale.cloud_storage.config')
@@ -26,7 +27,7 @@ utils.admin_connection = S3Connection(
     port=app.config['S3_PORT'],
     calling_format=OrdinaryCallingFormat()
 )
-utils.riak_connection = RiakClient(nodes=app.config['RIAK_KV_NODES'])
+utils.pg_connection = psycopg2.connect(**app.config['POSTGRES_DB'])
 utils.config = app.config
 
 

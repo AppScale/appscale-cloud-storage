@@ -1,5 +1,4 @@
 import datetime
-import dateutil.parser
 import hashlib
 import itertools
 import json
@@ -7,7 +6,6 @@ import re
 
 from boto.s3.multipart import MultiPartUpload
 from flask import Response
-from riak.riak_object import RiakObject
 from .constants import HTTP_ERROR
 
 # A cache used to store valid access tokens.
@@ -16,8 +14,8 @@ active_tokens = {}
 # A cache used to store active S3 connections.
 s3_connection_cache = {}
 
-# A Riak KV client connection.
-riak_connection = None
+# A psycopg2 connection.
+pg_connection = None
 
 # This configuration is defined when the app starts.
 config = None
@@ -76,12 +74,11 @@ def index_bucket(bucket_name, project):
         bucket_name: A string containing the bucket name.
         project: A string containing the project ID.
     """
-    bucket = riak_connection.bucket(config['METADATA_BUCKET'])
-    obj = RiakObject(riak_connection, bucket, bucket_name)
-    obj.content_type = 'application/json'
-    obj.data = '{}'
-    obj.add_index('project_bin', project)
-    obj.store()
+    with pg_connection.cursor() as cur:
+        cur.execute('INSERT INTO buckets (project, bucket) VALUES (%s, %s)',
+                    (project, bucket_name))
+
+    pg_connection.commit()
 
 
 def query_buckets(project):
@@ -92,8 +89,13 @@ def query_buckets(project):
     Returns:
         A set of strings containing bucket names.
     """
-    bucket = riak_connection.bucket(config['METADATA_BUCKET'])
-    return set(bucket.get_index('project_bin', project).results)
+    with pg_connection.cursor() as cur:
+        cur.execute('SELECT bucket FROM buckets WHERE project = %s',
+                    (project,))
+        buckets = {result[0] for result in cur.fetchall()}
+
+    pg_connection.rollback()
+    return buckets
 
 
 def set_token(token, user_id, expiration):
@@ -102,13 +104,15 @@ def set_token(token, user_id, expiration):
     Args:
         token: A string containing the token ID.
         user_id: A string containing the user ID.
-        aws_creds: A dictionary containing AWS credentials.
         expiration: A datetime object specifying the token expiration.
     """
-    bucket = riak_connection.bucket(config['TOKEN_BUCKET'])
     # TODO: Clean up expired tokens.
-    bucket.new(token, {'user': user_id, 'expiration': expiration.isoformat()})
-    active_tokens[token] = {'user': user_id, 'expiration': expiration}
+    with pg_connection.cursor() as cur:
+        cur.execute('INSERT INTO tokens (token, user_id, expiration) '
+                    'VALUES (%s, %s, %s)',
+                    (token, user_id, expiration))
+
+    pg_connection.commit()
 
 
 def get_user(token):
@@ -126,18 +130,22 @@ def get_user(token):
             return active_tokens[token]['user']
         raise TokenExpired('Token expired.')
 
-    # Try to fetch the token from Riak KV.
-    bucket = riak_connection.bucket(config['TOKEN_BUCKET'])
-    token = bucket.get(token)
-    if not token.exists:
+    # Try to fetch the token from Postgres.
+    with pg_connection.cursor() as cur:
+        cur.execute('SELECT user_id, expiration FROM tokens WHERE token = %s',
+                    (token,))
+        result = cur.fetchone()
+
+    pg_connection.rollback()
+
+    if result is None:
         raise TokenNotFound('Token not found.')
 
-    expiration = dateutil.parser.parse(token.data['expiration'])
+    user, expiration = result
     if datetime.datetime.now() > expiration:
         raise TokenExpired('Token expired.')
 
-    active_tokens[token] = {'user': token.data['user'],
-                            'expiration': expiration}
+    active_tokens[token] = {'user': user, 'expiration': expiration}
     return active_tokens[token]['user']
 
 
@@ -148,13 +156,20 @@ def upsert_upload_state(upload_id, state):
         upload_id: A string specifying the upload ID.
         state: A dictionary containing the upload state.
     """
-    bucket = riak_connection.bucket(config['UPLOAD_SESSION_BUCKET'])
-    obj = bucket.get(upload_id)
-    if obj.exists:
-        obj.data.update(state)
-        obj.store()
-        return
-    bucket.new(upload_id, data=state).store()
+    with pg_connection.cursor() as cur:
+        cur.execute('SELECT state FROM uploads WHERE id = %s', (upload_id,))
+        result = cur.fetchone()
+        if result is None:
+            new_state = state
+        else:
+            new_state = json.loads(result[0])
+            new_state.update(state)
+
+        cur.execute('INSERT INTO uploads (id, state) VALUES (%s, %s) '
+                    'ON CONFLICT (id) DO UPDATE SET state = EXCLUDED.state',
+                    (upload_id, json.dumps(new_state)))
+
+    pg_connection.commit()
 
 
 def get_upload_state(upload_id):
@@ -165,11 +180,16 @@ def get_upload_state(upload_id):
     Returns:
         A dictionary containing the upload state.
     """
-    bucket = riak_connection.bucket(config['UPLOAD_SESSION_BUCKET'])
-    state = bucket.get(upload_id)
-    if not state.exists:
+    with pg_connection.cursor() as cur:
+        cur.execute('SELECT state FROM uploads WHERE id = %s', (upload_id,))
+        result = cur.fetchone()
+
+    pg_connection.rollback()
+
+    if result is None:
         raise UploadNotFound('Invalid upload_id.')
-    return state.data
+
+    return json.loads(result[0])
 
 
 def get_completed_ranges(upload_request):
@@ -257,16 +277,16 @@ def set_object_metadata(key, data):
         key: A boto Key object.
         data: A dictionary containing object metadata.
     """
-    bucket = riak_connection.bucket(config['OBJECT_METADATA_BUCKET'])
-    metadata_key = '/'.join([key.name, key.bucket.name])
-    obj = bucket.get(metadata_key)
-    if obj.exists:
-        # Clear any existing metadata from previous objects with the same key.
-        obj.data.clear()
-        obj.data.update(data)
-        obj.store()
-        return
-    bucket.new(metadata_key, data=data).store()
+    bucket_name = key.bucket.name
+    object_name = key.name
+    with pg_connection.cursor() as cur:
+        cur.execute('INSERT INTO object_metadata (bucket, object, metadata) '
+                    'VALUES (%s, %s, %s) '
+                    'ON CONFLICT (bucket, object) '
+                    'DO UPDATE SET metadata = EXCLUDED.metadata',
+                    (bucket_name, object_name, json.dumps(data)))
+
+    pg_connection.commit()
 
 
 def get_object_metadata(key):
@@ -277,10 +297,20 @@ def get_object_metadata(key):
     Returns:
         A dictionary containing object metadata.
     """
-    bucket = riak_connection.bucket(config['OBJECT_METADATA_BUCKET'])
-    metadata_key = '/'.join([key.name, key.bucket.name])
-    obj = bucket.get(metadata_key)
-    return obj.data or {}
+    bucket_name = key.bucket.name
+    object_name = key.name
+    with pg_connection.cursor() as cur:
+        cur.execute('SELECT metadata FROM object_metadata '
+                    'WHERE bucket = %s AND object = %s',
+                    (bucket_name, object_name))
+        result = cur.fetchone()
+
+    pg_connection.rollback()
+
+    if result is None:
+        return {}
+
+    return json.loads(result[0])
 
 
 def delete_object_metadata(key):
@@ -289,6 +319,11 @@ def delete_object_metadata(key):
     Args:
         key: A boto Key object.
     """
-    bucket = riak_connection.bucket(config['OBJECT_METADATA_BUCKET'])
-    metadata_key = '/'.join([key.name, key.bucket.name])
-    bucket.delete(metadata_key)
+    bucket_name = key.bucket.name
+    object_name = key.name
+    with pg_connection.cursor() as cur:
+        cur.execute('DELETE FROM object_metadata '
+                    'WHERE bucket = %s AND object = %s',
+                    (bucket_name, object_name))
+
+    pg_connection.commit()

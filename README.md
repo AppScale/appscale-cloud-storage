@@ -6,19 +6,19 @@ this time, it is a wrapper that translates GCS JSON API calls to S3 calls.
 
 # How to set up
 
-1. Set up a [Riak KV](http://basho.com/products/riak-kv/) cluster to use for
-   storing bucket metadata and session state.
+1. Set up a PostgreSQL server to use for storing bucket metadata and session
+   state.
 2. Set up an S3-compatible server to use for storing objects.
-   [Riak S2](http://basho.com/products/riak-s2/) is recommended.
 3. In `settings.cfg`, specify `S3_ADMIN_CREDS`, `S3_HOST`, `S3_PORT`,
-   `RIAK_KV_NODES`, and define at least one user entry. Use the private key
+   `POSTGRES_DB`, and define at least one user entry. Use the private key
    defined in a JSON service credentials file to generate the certificate file.
 4. Install AppScale Cloud Storage with `python3 setup.py install`. Using a
    virtualenv is recommended.
-5. Define the following environment variables:
+5. Run `appscale-prime-cloud-storage` to generate the required Postgres tables.
+6. Define the following environment variables:
    `export FLASK_APP=appscale.cloud_storage` and
    `export APPSCALE_CLOUD_STORAGE_SETTINGS=/path/to/settings.cfg`.
-6. Start the server with `flask run`.
+7. Start the server with `flask run`.
 
 # Using the server
 

@@ -16,7 +16,10 @@ setup(
         'boto',
         'flask',
         'oauth2client',
-        'python-dateutil',
-        'riak'
-    ]
+        'psycopg2',
+        'python-dateutil'
+    ],
+    entry_points={'console_scripts': [
+        'appscale-prime-cloud-storage=appscale.cloud_storage.prime:prime']
+    }
 )
