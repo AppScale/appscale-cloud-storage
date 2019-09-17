@@ -238,6 +238,10 @@ def insert_object(bucket_name, upload_type, conn):
     object_name = request.args.get('name', default=None)
     upload_id = request.args.get('upload_id', default=None)
 
+    if object_name is None:
+        request_data = request.get_json()
+        object_name = request_data.get('name')
+
     if upload_type == 'media':
         if object_name is None:
             return error('Object name is required.', HTTP_BAD_REQUEST)
