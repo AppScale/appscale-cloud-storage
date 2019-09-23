@@ -259,7 +259,11 @@ def insert_object(bucket_name, upload_type, conn):
         return Response(json.dumps(obj), mimetype='application/json')
     if upload_type == 'resumable' and upload_id is None:
         if object_name is None:
-            return error('Object name is required.', HTTP_BAD_REQUEST)
+            request_data = request.get_json()
+            try:
+                object_name = request_data['name']
+            except KeyError:
+                return error('Object name is required.', HTTP_BAD_REQUEST)
 
         new_upload_id = ''.join(
             random.choice(current_app.config['RESUMABLE_ID_CHARS'])
